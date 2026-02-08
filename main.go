@@ -60,6 +60,8 @@ func main() {
 		runDue(notesPath, dueFormat, cfg)
 	case "list":
 		runList(notesPath, cfg)
+	case "config":
+		runConfig(notesPath, cfg)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -73,6 +75,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  review  Interactive TUI review of due cards")
 	fmt.Fprintln(os.Stderr, "  due     Print count of due cards (for polybar)")
 	fmt.Fprintln(os.Stderr, "  list    List decks and card counts")
+	fmt.Fprintln(os.Stderr, "  config  Configure deck ignore list")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Due flags:")
 	fmt.Fprintln(os.Stderr, "  --json            JSON output with full stats")
@@ -231,6 +234,52 @@ func runDue(path string, format string, cfg config.Config) {
 
 	if totalDue == 0 {
 		os.Exit(1)
+	}
+}
+
+func runConfig(path string, cfg config.Config) {
+	cards, err := parser.ParseDirectory(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing cards: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Build deck list from ALL cards (no ignore filtering)
+	deckCards := make(map[string]int)
+	for _, c := range cards {
+		deckCards[c.DeckName]++
+	}
+
+	var names []string
+	for name := range deckCards {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var entries []tui.ConfigEntry
+	for _, name := range names {
+		entries = append(entries, tui.ConfigEntry{
+			Name:    name,
+			Cards:   deckCards[name],
+			Ignored: cfg.IsDeckIgnored(name),
+		})
+	}
+
+	model := tui.NewConfigModel(entries)
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+		os.Exit(1)
+	}
+
+	result := finalModel.(tui.ConfigModel).Result()
+	if result.Saved {
+		cfg.IgnoreDecks = result.IgnoreDecks
+		if err := cfg.Save(config.DefaultConfigPath()); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 

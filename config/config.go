@@ -41,6 +41,21 @@ func (c Config) ResolvePath(arg string) string {
 	return c.NotesPath
 }
 
+// Save writes the config back to the given path as indented JSON, creating the directory if needed.
+func (c Config) Save(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
+}
+
 // IsDeckIgnored returns true if the deck name matches any entry in the ignore list.
 // Matching is done by prefix, so "leetcode" ignores "leetcode", "leetcode.dp.tasks", etc.
 func (c Config) IsDeckIgnored(deck string) bool {
