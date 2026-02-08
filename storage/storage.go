@@ -10,9 +10,10 @@ import (
 )
 
 type CardState struct {
-	NextReview time.Time `json:"next_review"`
-	Interval   int       `json:"interval"` // days
-	EaseFactor float64   `json:"ease_factor"`
+	NextReview   time.Time `json:"next_review"`
+	Interval     int       `json:"interval"` // days
+	EaseFactor   float64   `json:"ease_factor"`
+	LastReviewed time.Time `json:"last_reviewed,omitempty"`
 }
 
 type Rating int
@@ -127,7 +128,9 @@ func (s *Store) Rate(question string, rating Rating) {
 		state.EaseFactor += 0.15
 	}
 
-	state.NextReview = time.Now().Add(time.Duration(state.Interval) * 24 * time.Hour)
+	now := time.Now()
+	state.NextReview = now.Add(time.Duration(state.Interval) * 24 * time.Hour)
+	state.LastReviewed = now
 	s.Cards[key] = state
 }
 
@@ -139,4 +142,78 @@ func (s *Store) DueCount(questions []string) int {
 		}
 	}
 	return count
+}
+
+// IsNew returns true if the card has never been reviewed.
+func (s *Store) IsNew(question string) bool {
+	key := CardKey(question)
+	_, ok := s.Cards[key]
+	return !ok
+}
+
+// IsOverdue returns true if the card was due more than 1 day ago.
+func (s *Store) IsOverdue(question string) bool {
+	key := CardKey(question)
+	state, ok := s.Cards[key]
+	if !ok {
+		return false // new cards aren't overdue
+	}
+	return time.Now().After(state.NextReview.Add(24 * time.Hour))
+}
+
+// ReviewedToday returns how many of the given questions were reviewed today.
+func (s *Store) ReviewedToday(questions []string) int {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	count := 0
+	for _, q := range questions {
+		key := CardKey(q)
+		state, ok := s.Cards[key]
+		if ok && !state.LastReviewed.Before(startOfDay) {
+			count++
+		}
+	}
+	return count
+}
+
+// Streak returns the number of consecutive days (including today) with at least one review.
+func (s *Store) Streak() int {
+	if len(s.Cards) == 0 {
+		return 0
+	}
+
+	// Collect unique review dates
+	reviewDays := make(map[string]bool)
+	for _, state := range s.Cards {
+		if !state.LastReviewed.IsZero() {
+			day := state.LastReviewed.Format("2006-01-02")
+			reviewDays[day] = true
+		}
+	}
+
+	if len(reviewDays) == 0 {
+		return 0
+	}
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	// Check if today has reviews; if not, start from yesterday
+	streak := 0
+	day := today
+	if !reviewDays[day.Format("2006-01-02")] {
+		// No review today, check if yesterday had one (streak from yesterday)
+		day = day.AddDate(0, 0, -1)
+		if !reviewDays[day.Format("2006-01-02")] {
+			return 0
+		}
+	}
+
+	for reviewDays[day.Format("2006-01-02")] {
+		streak++
+		day = day.AddDate(0, 0, -1)
+	}
+
+	return streak
 }

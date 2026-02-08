@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/michal-franc/ankies-franc/config"
 	"github.com/michal-franc/ankies-franc/parser"
 	"github.com/michal-franc/ankies-franc/storage"
 	"github.com/michal-franc/ankies-franc/tui"
@@ -17,27 +20,46 @@ func main() {
 		os.Exit(1)
 	}
 
+	cfg := config.Load()
 	cmd := os.Args[1]
+	rest := os.Args[2:]
+
+	// Parse args: first non-flag arg is the path, rest are flags
+	pathArg := ""
+	dueFormat := "plain"
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case "--json":
+			dueFormat = "json"
+		case "--by-deck":
+			dueFormat = "by-deck"
+		case "--format":
+			if i+1 < len(rest) {
+				i++
+				dueFormat = rest[i]
+			}
+		default:
+			if pathArg == "" {
+				pathArg = rest[i]
+			}
+		}
+	}
+
+	notesPath := cfg.ResolvePath(pathArg)
+
+	if notesPath == "" {
+		fmt.Fprintln(os.Stderr, "No path provided and no notes_path in config.")
+		fmt.Fprintf(os.Stderr, "Set it in %s or pass a path argument.\n", config.DefaultConfigPath())
+		os.Exit(1)
+	}
 
 	switch cmd {
 	case "review":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: ankies-franc review <path>")
-			os.Exit(1)
-		}
-		runReview(os.Args[2])
+		runReview(notesPath)
 	case "due":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: ankies-franc due <path>")
-			os.Exit(1)
-		}
-		runDue(os.Args[2])
+		runDue(notesPath, dueFormat)
 	case "list":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: ankies-franc list <path>")
-			os.Exit(1)
-		}
-		runList(os.Args[2])
+		runList(notesPath)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -45,12 +67,19 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: ankies-franc <command> <path>")
+	fmt.Fprintln(os.Stderr, "Usage: ankies-franc <command> [path] [flags]")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  review  Interactive TUI review of due cards")
 	fmt.Fprintln(os.Stderr, "  due     Print count of due cards (for polybar)")
 	fmt.Fprintln(os.Stderr, "  list    List decks and card counts")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Due flags:")
+	fmt.Fprintln(os.Stderr, "  --json            JSON output with full stats")
+	fmt.Fprintln(os.Stderr, "  --format polybar  One-liner with new/overdue breakdown")
+	fmt.Fprintln(os.Stderr, "  --by-deck         Due counts per deck")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "Path is optional if notes_path is set in %s\n", config.DefaultConfigPath())
 }
 
 func runReview(path string) {
@@ -87,7 +116,7 @@ func runReview(path string) {
 	}
 }
 
-func runDue(path string) {
+func runDue(path string, format string) {
 	cards, err := parser.ParseDirectory(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing cards: %v\n", err)
@@ -100,15 +129,95 @@ func runDue(path string) {
 		os.Exit(1)
 	}
 
+	// Compute stats
 	var questions []string
+	type deckStats struct {
+		Due   int `json:"due"`
+		New   int `json:"new"`
+		Total int `json:"total"`
+	}
+	decks := make(map[string]*deckStats)
+
+	totalDue, totalNew, totalOverdue := 0, 0, 0
 	for _, c := range cards {
 		questions = append(questions, c.Question)
+
+		ds, ok := decks[c.DeckName]
+		if !ok {
+			ds = &deckStats{}
+			decks[c.DeckName] = ds
+		}
+		ds.Total++
+
+		if store.IsDue(c.Question) {
+			totalDue++
+			ds.Due++
+		}
+		if store.IsNew(c.Question) {
+			totalNew++
+			ds.New++
+		}
+		if store.IsOverdue(c.Question) {
+			totalOverdue++
+		}
 	}
 
-	count := store.DueCount(questions)
-	fmt.Println(count)
+	reviewedToday := store.ReviewedToday(questions)
+	streak := store.Streak()
 
-	if count == 0 {
+	switch format {
+	case "json":
+		output := struct {
+			Due           int                   `json:"due"`
+			New           int                   `json:"new"`
+			Overdue       int                   `json:"overdue"`
+			ReviewedToday int                   `json:"reviewed_today"`
+			Streak        int                   `json:"streak"`
+			Decks         map[string]*deckStats  `json:"decks"`
+		}{
+			Due:           totalDue,
+			New:           totalNew,
+			Overdue:       totalOverdue,
+			ReviewedToday: reviewedToday,
+			Streak:        streak,
+			Decks:         decks,
+		}
+		data, _ := json.Marshal(output)
+		fmt.Println(string(data))
+
+	case "polybar":
+		parts := []string{}
+		if totalNew > 0 {
+			parts = append(parts, fmt.Sprintf("%d new", totalNew))
+		}
+		if totalOverdue > 0 {
+			parts = append(parts, fmt.Sprintf("%d overdue", totalOverdue))
+		}
+		if len(parts) > 0 {
+			fmt.Printf("%d (%s)\n", totalDue, strings.Join(parts, ", "))
+		} else {
+			fmt.Println(totalDue)
+		}
+
+	case "by-deck":
+		var names []string
+		for name := range decks {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		parts := []string{}
+		for _, name := range names {
+			if decks[name].Due > 0 {
+				parts = append(parts, fmt.Sprintf("%s: %d", name, decks[name].Due))
+			}
+		}
+		fmt.Println(strings.Join(parts, "  "))
+
+	default:
+		fmt.Println(totalDue)
+	}
+
+	if totalDue == 0 {
 		os.Exit(1)
 	}
 }
