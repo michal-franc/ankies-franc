@@ -66,20 +66,12 @@ func runReview(path string) {
 		os.Exit(1)
 	}
 
-	// Filter to only due cards
-	var dueCards []parser.Card
-	for _, c := range cards {
-		if store.IsDue(c.Question) {
-			dueCards = append(dueCards, c)
-		}
-	}
-
-	if len(dueCards) == 0 {
-		fmt.Println("No cards due for review. Come back later!")
+	if len(cards) == 0 {
+		fmt.Println("No flashcards found.")
 		return
 	}
 
-	model := tui.New(dueCards, store)
+	model := tui.New(cards, store)
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
