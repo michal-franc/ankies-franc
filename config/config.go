@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Config struct {
-	NotesPath string `json:"notes_path"`
+	NotesPath   string   `json:"notes_path"`
+	IgnoreDecks []string `json:"ignore_decks,omitempty"`
 }
 
 func DefaultConfigPath() string {
@@ -37,4 +39,15 @@ func (c Config) ResolvePath(arg string) string {
 		return arg
 	}
 	return c.NotesPath
+}
+
+// IsDeckIgnored returns true if the deck name matches any entry in the ignore list.
+// Matching is done by prefix, so "leetcode" ignores "leetcode", "leetcode.dp.tasks", etc.
+func (c Config) IsDeckIgnored(deck string) bool {
+	for _, pattern := range c.IgnoreDecks {
+		if deck == pattern || strings.HasPrefix(deck, pattern+".") {
+			return true
+		}
+	}
+	return false
 }

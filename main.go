@@ -55,11 +55,11 @@ func main() {
 
 	switch cmd {
 	case "review":
-		runReview(notesPath)
+		runReview(notesPath, cfg)
 	case "due":
-		runDue(notesPath, dueFormat)
+		runDue(notesPath, dueFormat, cfg)
 	case "list":
-		runList(notesPath)
+		runList(notesPath, cfg)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -82,12 +82,23 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "Path is optional if notes_path is set in %s\n", config.DefaultConfigPath())
 }
 
-func runReview(path string) {
+func filterIgnored(cards []parser.Card, cfg config.Config) []parser.Card {
+	var filtered []parser.Card
+	for _, c := range cards {
+		if !cfg.IsDeckIgnored(c.DeckName) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+func runReview(path string, cfg config.Config) {
 	cards, err := parser.ParseDirectory(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing cards: %v\n", err)
 		os.Exit(1)
 	}
+	cards = filterIgnored(cards, cfg)
 
 	store, err := storage.Load(storage.DefaultPath())
 	if err != nil {
@@ -116,12 +127,13 @@ func runReview(path string) {
 	}
 }
 
-func runDue(path string, format string) {
+func runDue(path string, format string, cfg config.Config) {
 	cards, err := parser.ParseDirectory(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing cards: %v\n", err)
 		os.Exit(1)
 	}
+	cards = filterIgnored(cards, cfg)
 
 	store, err := storage.Load(storage.DefaultPath())
 	if err != nil {
@@ -222,12 +234,13 @@ func runDue(path string, format string) {
 	}
 }
 
-func runList(path string) {
+func runList(path string, cfg config.Config) {
 	cards, err := parser.ParseDirectory(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing cards: %v\n", err)
 		os.Exit(1)
 	}
+	cards = filterIgnored(cards, cfg)
 
 	store, err := storage.Load(storage.DefaultPath())
 	if err != nil {
