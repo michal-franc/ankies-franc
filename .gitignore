@@ -1,3 +1,5 @@
 ankies-franc
 *.json
+coverage.out
+coverage.html
 

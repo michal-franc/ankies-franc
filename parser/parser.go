@@ -48,7 +48,7 @@ func parseFile(path string) ([]Card, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	var lines []string
@@ -130,7 +130,6 @@ func extractCards(lines []string, deck, sourceFile string) []Card {
 		// then collect contiguous non-blank lines until we hit a blank line,
 		// #review-flashcard, flashcards tag, or regionStart
 		qEnd := sepIdx // exclusive
-		qStart := sepIdx
 
 		// Skip trailing blanks before ?
 		for qEnd > regionStart && strings.TrimSpace(lines[qEnd-1]) == "" {
@@ -138,7 +137,7 @@ func extractCards(lines []string, deck, sourceFile string) []Card {
 		}
 
 		// Now walk backwards to find the start of the question block
-		qStart = qEnd
+		qStart := qEnd
 		for qStart > regionStart {
 			trimmed := strings.TrimSpace(lines[qStart-1])
 			if trimmed == "" || trimmed == "#review-flashcard" || containsFlashcardsTag(trimmed) {
